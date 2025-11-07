@@ -1,0 +1,56 @@
+name: deploy-main-to-iis
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-main.yml"
+
+jobs:
+  build_and_deploy:
+    runs-on: [self-hosted, windows]   # matches your runner labels
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        working-directory: backend
+        run: dotnet restore
+
+      - name: Build
+        working-directory: backend
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        working-directory: backend
+        run: dotnet test -c Release --no-build
+
+      - name: Publish
+        working-directory: backend
+        run: dotnet publish -c Release -o ../out/api
+
+      - name: Deploy to IIS (E:\Parth\ReactCoreApi)
+        shell: pwsh
+        run: |
+          Import-Module WebAdministration
+
+          $apiSource = "$(Resolve-Path ./out/api)"
+          $apiDest   = "E:\Parth\ReactCoreApi"
+
+          New-Item -ItemType Directory -Force -Path $apiDest | Out-Null
+
+          if (Test-Path IIS:\AppPools\ReactCoreApi) {
+            Stop-WebAppPool -Name ReactCoreApi -ErrorAction SilentlyContinue
+          }
+
+          Get-ChildItem $apiDest -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          robocopy $apiSource $apiDest /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+
+          if (Test-Path IIS:\AppPools\ReactCoreApi) {
+            Start-WebAppPool -Name ReactCoreApi
+          }
+
+          Write-Host "Deployment complete."
