@@ -37,14 +37,13 @@ jobs:
         working-directory: platform/backend
         run: dotnet publish -c Release -o ../out/api
 
-      - name: Deploy to IIS (E:\Parth\ReactCoreApi)
+        - name: Deploy to IIS (E:\Parth\ReactCoreApi)
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
           Import-Module WebAdministration
 
-          # publish output path relative to repo root:
           $apiSource = "$(Resolve-Path "$env:GITHUB_WORKSPACE\platform\out\api")"
           $apiDest   = "E:\Parth\ReactCoreApi"
 
@@ -56,8 +55,12 @@ jobs:
 
           Get-ChildItem $apiDest -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
+          # Run robocopy and normalize its exit code
           robocopy $apiSource $apiDest /MIR /NFL /NDL /NJH /NJS /NP
-          if ($LASTEXITCODE -gt 3) { throw "Robocopy failed with exit code $LASTEXITCODE" }
+          $rc = $LASTEXITCODE
+          Write-Host "Robocopy exit code: $rc"
+          if ($rc -gt 3) { throw "Robocopy failed with exit code $rc" }
+          $global:LASTEXITCODE = 0   # <-- prevent GitHub from treating success (1–3) as failure
 
           if (Test-Path IIS:\AppPools\ReactCoreApi) {
             Start-WebAppPool -Name ReactCoreApi
