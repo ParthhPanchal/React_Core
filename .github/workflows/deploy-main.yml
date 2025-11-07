@@ -32,12 +32,12 @@ jobs:
         working-directory: platform/backend
         run: dotnet test -c Release --no-build
 
-      # NOTE: publishes to platform/out/api (relative to repo root)
+      # publishes to platform/out/api (relative to repo root)
       - name: Publish
         working-directory: platform/backend
         run: dotnet publish -c Release -o ../out/api
 
-        - name: Deploy to IIS (E:\Parth\ReactCoreApi)
+      - name: Deploy to IIS (E:\Parth\ReactCoreApi)
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
@@ -47,6 +47,10 @@ jobs:
           $apiSource = "$(Resolve-Path "$env:GITHUB_WORKSPACE\platform\out\api")"
           $apiDest   = "E:\Parth\ReactCoreApi"
 
+          if (-not (Test-Path $apiSource)) {
+            throw "Publish output not found at $apiSource"
+          }
+
           New-Item -ItemType Directory -Force -Path $apiDest | Out-Null
 
           if (Test-Path IIS:\AppPools\ReactCoreApi) {
@@ -55,12 +59,12 @@ jobs:
 
           Get-ChildItem $apiDest -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-          # Run robocopy and normalize its exit code
+          # Robocopy returns 0–3 for success; normalize for GitHub Actions
           robocopy $apiSource $apiDest /MIR /NFL /NDL /NJH /NJS /NP
           $rc = $LASTEXITCODE
           Write-Host "Robocopy exit code: $rc"
           if ($rc -gt 3) { throw "Robocopy failed with exit code $rc" }
-          $global:LASTEXITCODE = 0   # <-- prevent GitHub from treating success (1–3) as failure
+          $global:LASTEXITCODE = 0
 
           if (Test-Path IIS:\AppPools\ReactCoreApi) {
             Start-WebAppPool -Name ReactCoreApi
