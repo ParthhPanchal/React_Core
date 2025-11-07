@@ -1,4 +1,5 @@
 name: deploy-main-to-iis
+
 on:
   workflow_dispatch:
   push:
@@ -9,7 +10,8 @@ on:
 
 jobs:
   build_and_deploy:
-    runs-on: [self-hosted, windows]   # matches your runner labels
+    runs-on: [self-hosted, windows]
+
     steps:
       - uses: actions/checkout@v4
 
@@ -25,20 +27,25 @@ jobs:
         working-directory: platform/backend
         run: dotnet build -c Release --no-restore
 
+      # (disable if you don't have tests yet)
       - name: Test
         working-directory: platform/backend
         run: dotnet test -c Release --no-build
 
+      # NOTE: publishes to platform/out/api (relative to repo root)
       - name: Publish
         working-directory: platform/backend
         run: dotnet publish -c Release -o ../out/api
 
       - name: Deploy to IIS (E:\Parth\ReactCoreApi)
-        shell: pwsh
+        shell: powershell
         run: |
+          Set-StrictMode -Version Latest
+          $ErrorActionPreference = 'Stop'
           Import-Module WebAdministration
 
-          $apiSource = "$(Resolve-Path ./out/api)"
+          # publish output path relative to repo root:
+          $apiSource = "$(Resolve-Path "$env:GITHUB_WORKSPACE\platform\out\api")"
           $apiDest   = "E:\Parth\ReactCoreApi"
 
           New-Item -ItemType Directory -Force -Path $apiDest | Out-Null
@@ -48,7 +55,9 @@ jobs:
           }
 
           Get-ChildItem $apiDest -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          robocopy $apiSource $apiDest /MIR /NFL /NDL /NJH /NJS /NP | Out-Null
+
+          robocopy $apiSource $apiDest /MIR /NFL /NDL /NJH /NJS /NP
+          if ($LASTEXITCODE -gt 3) { throw "Robocopy failed with exit code $LASTEXITCODE" }
 
           if (Test-Path IIS:\AppPools\ReactCoreApi) {
             Start-WebAppPool -Name ReactCoreApi
