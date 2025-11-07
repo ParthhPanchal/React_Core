@@ -77,5 +77,6 @@ app.UseCors("AllowAll");
 app.UseAuthorization();
 
 app.MapControllers();
+
 //staging 1
 app.Run();
