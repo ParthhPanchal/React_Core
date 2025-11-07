@@ -1,4 +1,4 @@
-using FluentValidation;
+﻿using FluentValidation;
 using FluentValidation.AspNetCore;
 using Hospital.Application.Repositories;
 using Hospital.Application.Services;
@@ -60,25 +60,16 @@ builder.Services.AddSwaggerGen(c =>
 var app = builder.Build();
 
 // Configure the HTTP request pipeline
-if (app.Environment.IsDevelopment())
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI(c =>
-    {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Hospital API V1");
-        c.RoutePrefix = string.Empty; // Swagger at root
-    });
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Hospital API V1");
+    c.RoutePrefix = string.Empty; // Swagger at root
+});
 
 app.UseHttpsRedirection();
-
 app.UseCors("AllowAll");
-
 app.UseAuthorization();
-
 app.MapControllers();
-
-//staging 1
-//change 1
-//change 2
+app.MapGet("/", () => "✅ Hospital API is running.");
 app.Run();
