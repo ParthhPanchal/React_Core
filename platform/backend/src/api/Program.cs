@@ -66,7 +66,7 @@ app.UseSwaggerUI(c =>
     c.SwaggerEndpoint("/swagger/v1/swagger.json", "Hospital API V1");
     c.RoutePrefix = string.Empty; // Swagger at root
 });
-//test service
+//test service 1
 app.UseHttpsRedirection();
 app.UseCors("AllowAll");
 app.UseAuthorization();
