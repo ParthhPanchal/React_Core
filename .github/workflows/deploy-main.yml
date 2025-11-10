@@ -1,56 +1,51 @@
-name: ci-and-deploy-iis
+name: deploy-iis-multi-env
 
 on:
-  pull_request:
-    branches: [ main ]
+  push:
+    branches: [ staging, preprod ]          # auto deploy when these receive commits
     paths:
       - "platform/backend/**"
-      - ".github/workflows/deploy-main.yml"
-  workflow_dispatch:
+      - ".github/workflows/deploy-iis.yml"
+  workflow_dispatch:                         # manual deploy (use for production)
     inputs:
-      reason:
-        description: "Why are you deploying?"
+      target:
+        description: "Environment to deploy"
+        required: true
+        type: choice
+        options: [ staging, preprod, production ]
+        default: production
+      ref:
+        description: "Branch/tag to deploy (blank = current)"
         required: false
 
 permissions:
   contents: read
 
+# block overlapping deploys per environment
 concurrency:
-  group: deploy-main
+  group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.target || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  # ---- CI checks for PRs (no environment here if you don't require staging) ----
-  build-test:
+  build-and-deploy:
     runs-on: [self-hosted, windows]
-    if: github.event_name == 'pull_request'
-    steps:
-      - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+    # Run on push to staging/preprod, or on manual dispatch
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    # Attach the matching GitHub Environment (this is where prod approval happens)
+    environment:
+      name: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.ref_name }}
+
+    env:
+      # Resolve which environment we’re deploying to
+      DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.target || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          dotnet-version: '8.0.x'
-
-      - name: Restore
-        working-directory: platform/backend
-        run: dotnet restore
-
-      - name: Build
-        working-directory: platform/backend
-        run: dotnet build -c Release --no-restore
-
-      - name: Test
-        working-directory: platform/backend
-        run: dotnet test -c Release --no-build
-
-  # ---- Manual production deploy (environment must be HERE, at the job level) ----
-  deploy-to-iis:
-    runs-on: [self-hosted, windows]
-    if: github.event_name == 'workflow_dispatch'
-    environment: 
-      name: production
-    steps:
-      - uses: actions/checkout@v4
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
 
       - uses: actions/setup-dotnet@v4
         with:
@@ -72,24 +67,28 @@ jobs:
         working-directory: platform/backend
         run: dotnet publish -c Release -o ../out/api
 
-      - name: Deploy to IIS (E:\Parth\ReactCoreApi)
+      - name: Deploy to IIS
         shell: powershell
         run: |
           Set-StrictMode -Version Latest
           $ErrorActionPreference = 'Stop'
           Import-Module WebAdministration
 
-          $apiSource = "$(Resolve-Path "$env:GITHUB_WORKSPACE\platform\out\api")"
-          $apiDest   = "E:\Parth\ReactCoreApi"
-
-          if (-not (Test-Path $apiSource)) {
-            throw "Publish output not found at $apiSource"
+          # Choose paths/pools by environment
+          switch ($env:DEPLOY_ENV) {
+            'staging'    { $apiDest = 'E:\Parth\ReactCoreApi-Staging' ; $pool = 'ReactCoreApi-Staging' }
+            'preprod'    { $apiDest = 'E:\Parth\ReactCoreApi-Preprod' ; $pool = 'ReactCoreApi-Preprod' }
+            'production' { $apiDest = 'E:\Parth\ReactCoreApi'         ; $pool = 'ReactCoreApi' }
+            default      { throw "Unknown DEPLOY_ENV: $env:DEPLOY_ENV" }
           }
+
+          $apiSource = "$(Resolve-Path "$env:GITHUB_WORKSPACE\platform\out\api")"
+          if (-not (Test-Path $apiSource)) { throw "Publish output not found at $apiSource" }
 
           New-Item -ItemType Directory -Force -Path $apiDest | Out-Null
 
-          if (Test-Path IIS:\AppPools\ReactCoreApi) {
-            Stop-WebAppPool -Name ReactCoreApi -ErrorAction SilentlyContinue
+          if (Test-Path "IIS:\AppPools\$pool") {
+            Stop-WebAppPool -Name $pool -ErrorAction SilentlyContinue
           }
 
           Get-ChildItem $apiDest -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -100,8 +99,8 @@ jobs:
           if ($rc -gt 3) { throw "Robocopy failed with exit code $rc" }
           $global:LASTEXITCODE = 0
 
-          if (Test-Path IIS:\AppPools\ReactCoreApi) {
-            Start-WebAppPool -Name ReactCoreApi
+          if (Test-Path "IIS:\AppPools\$pool") {
+            Start-WebAppPool -Name $pool
           }
 
-          Write-Host "Deployment complete."
+          Write-Host "Deployment to $env:DEPLOY_ENV complete."
