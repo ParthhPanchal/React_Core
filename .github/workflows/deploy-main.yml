@@ -1,17 +1,34 @@
-name: deploy-main-to-iis
+name: ci-and-deploy-iis
 
 on:
-  workflow_dispatch:
-  push:
+  # PRs run CI checks (build/test) that you can mark as "required" in branch protection
+  pull_request:
     branches: [ main ]
     paths:
       - "platform/backend/**"
       - ".github/workflows/deploy-main.yml"
 
-jobs:
-  build_and_deploy:
-    runs-on: [self-hosted, windows]
+  # Manual release only
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Why are you deploying?"
+        required: false
 
+permissions:
+  contents: read
+  deployments: production   # needed to create environment deployments
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+jobs:
+  # ---- CI checks for PRs ----
+  ci:
+    name: build-test
+    runs-on: [self-hosted, windows]
+    if: github.event_name == 'pull_request'
     steps:
       - uses: actions/checkout@v4
 
@@ -27,12 +44,36 @@ jobs:
         working-directory: platform/backend
         run: dotnet build -c Release --no-restore
 
-      # (disable if you don't have tests yet)
       - name: Test
         working-directory: platform/backend
         run: dotnet test -c Release --no-build
 
-      # publishes to platform/out/api (relative to repo root)
+  # ---- Manual deploy to IIS with approval ----
+  deploy:
+    name: deploy-to-iis
+    runs-on: [self-hosted, windows]
+    if: github.event_name == 'workflow_dispatch'
+    environment:
+      name: production    # triggers the Environment gate/approval & satisfies "Require deployments ..."
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        working-directory: platform/backend
+        run: dotnet restore
+
+      - name: Build
+        working-directory: platform/backend
+        run: dotnet build -c Release --no-restore
+
+      - name: Test
+        working-directory: platform/backend
+        run: dotnet test -c Release --no-build
+
       - name: Publish
         working-directory: platform/backend
         run: dotnet publish -c Release -o ../out/api
@@ -59,7 +100,6 @@ jobs:
 
           Get-ChildItem $apiDest -Force | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-          # Robocopy returns 0–3 for success; normalize for GitHub Actions
           robocopy $apiSource $apiDest /MIR /NFL /NDL /NJH /NJS /NP
           $rc = $LASTEXITCODE
           Write-Host "Robocopy exit code: $rc"
