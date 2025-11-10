@@ -1,14 +1,11 @@
 name: ci-and-deploy-iis
 
 on:
-  # PRs run CI checks (build/test) that you can mark as "required" in branch protection
   pull_request:
     branches: [ main ]
     paths:
       - "platform/backend/**"
       - ".github/workflows/deploy-main.yml"
-
-  # Manual release only
   workflow_dispatch:
     inputs:
       reason:
@@ -17,16 +14,14 @@ on:
 
 permissions:
   contents: read
-  deployments: production   # needed to create environment deployments
 
 concurrency:
   group: deploy-main
   cancel-in-progress: false
 
 jobs:
-  # ---- CI checks for PRs ----
-  ci:
-    name: build-test
+  # ---- CI checks for PRs (no environment here if you don't require staging) ----
+  build-test:
     runs-on: [self-hosted, windows]
     if: github.event_name == 'pull_request'
     steps:
@@ -48,13 +43,12 @@ jobs:
         working-directory: platform/backend
         run: dotnet test -c Release --no-build
 
-  # ---- Manual deploy to IIS with approval ----
-  deploy:
-    name: deploy-to-iis
+  # ---- Manual production deploy (environment must be HERE, at the job level) ----
+  deploy-to-iis:
     runs-on: [self-hosted, windows]
     if: github.event_name == 'workflow_dispatch'
-    environment:
-      name: production    # triggers the Environment gate/approval & satisfies "Require deployments ..."
+    environment: 
+      name: production
     steps:
       - uses: actions/checkout@v4
 
